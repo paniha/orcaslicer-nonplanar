@@ -1,10 +1,11 @@
 > [!NOTE]
 > **This fork adds Windows x64.** Download it from Releases.
-> Binaries are portable, so just unzip and run, no install required.
-> This version will create a separate config (%APPDATA%) folder - so your existing profiles will not carry over unless you overwrite.
-> This also means that your existing Orca profiles and settings are safe in case of issues.
 > Build instructions and known limits are in [windows/README.md](windows/README.md). 
 > **Please report Windows problems here**, not to the original project.
+
+- Windows Binaries are portable, so just unzip and run, no install required.
+- This version will create a separate config (%APPDATA%) folder - so your existing profiles will not carry over unless you overwrite.
+This also means that your existing Orca profiles and settings are safe in case of issues with this fork.
 
 # OrcaSlicer Nonplanar v0.1
 
