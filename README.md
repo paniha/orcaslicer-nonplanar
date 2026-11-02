@@ -11,8 +11,8 @@ This also means that your existing Orca profiles and settings are safe in case o
 # OrcaSlicer Nonplanar v0.1
 
 > [!IMPORTANT]
-> **macOS with Apple Silicon (M1 or newer) only.**
-> v0.1 doesn't run on Intel Macs, Windows or Linux.
+> **macOS with Apple Silicon (M1 or newer) and Windows only.**
+> v0.1 doesn't run on Intel Macs, ~~Windows~~ or Linux.
 
 **Test release.** OrcaSlicer 2.4.2 with **nonplanar top surfaces**: the last shells of gently sloped tops
 (up to 12°) follow the surface instead of being printed as stair steps. Every nonplanar move is checked against
