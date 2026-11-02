@@ -6,6 +6,7 @@
 - Windows Binaries are portable, so just unzip and run, no install required.
 - This version will create a separate config (%APPDATA%) folder - so your existing profiles will not carry over unless you overwrite.
 This also means that your existing Orca profiles and settings are safe in case of issues with this fork.
+- If you want to copy your settings and profiles, goto %APPDATA%, delete OrcaSlicerNonplanar, copy OrcaSlicer and rename the copy OrcaSlicerNonplanar.
 
 # OrcaSlicer Nonplanar v0.1
 
