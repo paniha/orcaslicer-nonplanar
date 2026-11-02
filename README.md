@@ -1,3 +1,8 @@
+> [!NOTE]
+> **This fork adds Windows x64.** Download it from Releases. Build instructions and
+> known limits are in [windows/README.md](windows/README.md). Please report Windows
+> problems here, not to the original project.
+
 # OrcaSlicer Nonplanar v0.1
 
 > [!IMPORTANT]
