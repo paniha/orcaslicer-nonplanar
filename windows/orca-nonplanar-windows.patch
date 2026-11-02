@@ -1,0 +1,236 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8dcd4cf0..15c5254d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -928,12 +928,16 @@ endif ()
+ install(FILES ${CMAKE_SOURCE_DIR}/LICENSE.txt DESTINATION ".")
+ configure_file(${LIBDIR}/dev-utils/platform/unix/fhs.hpp.in ${LIBDIR_BIN}/dev-utils/platform/unix/fhs.hpp)
+ 
+-set (CPACK_PACKAGE_NAME "OrcaSlicer")
++# OrcaSlicer Nonplanar: an own installer identity.  With the upstream values the
++# installer would find the "OrcaSlicer" uninstall key of a normal OrcaSlicer, offer
++# to uninstall it (CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL) and install into
++# the same folder.
++set (CPACK_PACKAGE_NAME "OrcaSlicer Nonplanar")
+ set (CPACK_PACKAGE_VENDOR "SoftFever")
+ set (CPACK_PACKAGE_VERSION_MAJOR "${ORCA_VERSION_MAJOR}")
+ set (CPACK_PACKAGE_VERSION_MINOR "${ORCA_VERSION_MINOR}")
+ set (CPACK_PACKAGE_VERSION_PATCH "${ORCA_VERSION_PATCH}")
+-set (CPACK_PACKAGE_FILE_NAME "OrcaSlicer_Windows_Installer_V${SoftFever_VERSION}")
++set (CPACK_PACKAGE_FILE_NAME "OrcaSlicer_Nonplanar_${ORCA_NONPLANAR_VERSION}_Windows_Installer_V${SoftFever_VERSION}")
+ # Suffix the Windows installer with its target arch so the x64 and arm64 builds
+ # produce distinct filenames (matches ARCH_SUFFIX in build_orca.yml). Same
+ # CMAKE_SYSTEM_PROCESSOR mapping used by orcaslicer_copy_dlls() above.
+@@ -952,14 +956,14 @@ set (CPACK_NSIS_MUI_ICON "${CPACK_PACKAGE_ICON}")
+ set (CPACK_NSIS_MUI_UNIICON "${CPACK_PACKAGE_ICON}")
+ set (CPACK_NSIS_INSTALLED_ICON_NAME  "$INSTDIR\\\\orca-slicer.exe")
+ set (CPACK_PACKAGE_CHECKSUM SHA256)
+-set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY "OrcaSlicer")
++set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY "OrcaSlicerNonplanar")
+ set (CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+ set (CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
+ # set (CPACK_NSIS_MODIFY_PATH "ON")
+-set(CPACK_PACKAGE_EXECUTABLES "orca-slicer;OrcaSlicer")
++set(CPACK_PACKAGE_EXECUTABLES "orca-slicer;OrcaSlicer Nonplanar")
+ set(CPACK_CREATE_DESKTOP_LINKS "orca-slicer")
+ set (CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE.txt) # must also include in install command
+ 
+-set(CPACK_WIX_UPGRADE_GUID "058245e8-20e0-4a95-9ab7-1acfe17ad511")
++set(CPACK_WIX_UPGRADE_GUID "6f2a1c1e-7d4b-4e36-9a51-3c0f6b1e8d27")
+ set(CPACK_GENERATOR NSIS)
+ include(CPack)
+diff --git a/src/libslic3r/GCode.cpp b/src/libslic3r/GCode.cpp
+index 3372459a..17ab713f 100644
+--- a/src/libslic3r/GCode.cpp
++++ b/src/libslic3r/GCode.cpp
+@@ -25,6 +25,7 @@
+ #include "GCode/ExtrusionProcessor.hpp"
+ #include <algorithm>
+ #include <cfloat>
++#include <tuple>
+ #include <cmath>
+ #include <cstdlib>
+ #include <chrono>
+@@ -6442,7 +6443,11 @@ std::string GCode::extrude_multi_path(const ExtrusionMultiPath& multipath, const
+ 
+ void GCode::queue_advanced_conformal(const Print &print)
+ {
+-    for (const auto &[object, plan] : m_nonplanar_deferral) {
++    for (const auto &deferral : m_nonplanar_deferral) {
++        // Named references, not a structured binding: the lambda below captures
++        // them, which is a C++20 feature and this project is built as C++17.
++        const auto &object = deferral.first;
++        const auto &plan   = deferral.second;
+         if (plan.advanced_paths == 0)
+             continue;
+         for (const Layer *layer : object->layers()) {
+diff --git a/src/libslic3r/NonplanarSchedule.cpp b/src/libslic3r/NonplanarSchedule.cpp
+index 51cf2535..b8da8a73 100644
+--- a/src/libslic3r/NonplanarSchedule.cpp
++++ b/src/libslic3r/NonplanarSchedule.cpp
+@@ -14,9 +14,13 @@
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
++#include <functional>
++#include <limits>
+ #include <set>
+ #include <sstream>
++#include <tuple>
+ #include <unordered_map>
++#include <utility>
+ 
+ namespace Slic3r {
+ 
+diff --git a/src/libslic3r/NonplanarSchedule.hpp b/src/libslic3r/NonplanarSchedule.hpp
+index 5071ff1f..8dd47f07 100644
+--- a/src/libslic3r/NonplanarSchedule.hpp
++++ b/src/libslic3r/NonplanarSchedule.hpp
+@@ -7,6 +7,7 @@
+ 
+ #include <map>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ namespace Slic3r {
+diff --git a/src/libslic3r/NonplanarSurface.cpp b/src/libslic3r/NonplanarSurface.cpp
+index 03ddaf8f..63f3006b 100644
+--- a/src/libslic3r/NonplanarSurface.cpp
++++ b/src/libslic3r/NonplanarSurface.cpp
+@@ -2,6 +2,10 @@
+ #include "Exception.hpp"
+ 
+ #include <cstdio>
++#include <iostream>
++#include <map>
++#include <utility>
++#include <vector>
+ #include <boost/log/trivial.hpp>
+ 
+ namespace Slic3r {
+@@ -178,13 +182,22 @@ NonplanarSurface::group_surfaces()
+ void
+ NonplanarSurface::mark_neighbor_surfaces(int id)
+ {
+-    //if already marked return
+-    if(this->mesh.find(id) == this->mesh.end() || this->mesh[id].marked == true) return;
+-    //mark this facet
+-    this->mesh[id].marked = true;
+-    //mark all neighbors
+-    for(int j = 0; j < 3; j++) {
+-        this->mark_neighbor_surfaces(this->mesh[id].neighbor[j]);
++    // Explicit stack instead of recursion: the depth grows with the facet count
++    // of a connected surface, which overflows the 1 MB main thread stack of
++    // Windows (the CLI and the unit tests slice there) on dense meshes.
++    std::vector<int> pending { id };
++    while (! pending.empty()) {
++        const int current = pending.back();
++        pending.pop_back();
++        //if already marked continue
++        auto facet = this->mesh.find(current);
++        if (facet == this->mesh.end() || facet->second.marked)
++            continue;
++        //mark this facet
++        facet->second.marked = true;
++        //mark all neighbors
++        for (int j = 0; j < 3; j++)
++            pending.push_back(facet->second.neighbor[j]);
+     }
+ }
+ 
+diff --git a/src/libslic3r/NonplanarSurface.hpp b/src/libslic3r/NonplanarSurface.hpp
+index ef21d42a..d3b2e4f9 100644
+--- a/src/libslic3r/NonplanarSurface.hpp
++++ b/src/libslic3r/NonplanarSurface.hpp
+@@ -9,6 +9,10 @@
+ #include "Geometry.hpp"
+ #include "ClipperUtils.hpp"
+ 
++#include <map>
++#include <utility>
++#include <vector>
++
+ namespace Slic3r {
+ 
+ typedef struct {
+diff --git a/src/slic3r/GUI/AboutDialog.cpp b/src/slic3r/GUI/AboutDialog.cpp
+index 391437c7..381b109a 100644
+--- a/src/slic3r/GUI/AboutDialog.cpp
++++ b/src/slic3r/GUI/AboutDialog.cpp
+@@ -244,7 +244,7 @@ AboutDialog::AboutDialog()
+ 
+         vesizer->Add(0, 0, 1, wxEXPAND, FromDIP(5));
+         auto          version_string = std::string(SoftFever_VERSION) + " · Nonplanar " + ORCA_NONPLANAR_VERSION; // _L("Orca Slicer ") + " " + std::string(SoftFever_VERSION);
+-        wxStaticText* version = new wxStaticText(this, wxID_ANY, version_string.c_str(), wxDefaultPosition, wxDefaultSize);
++        wxStaticText* version = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(version_string.c_str()), wxDefaultPosition, wxDefaultSize);
+         wxStaticText* credits_string = new wxStaticText(this, wxID_ANY, wxString::Format("Build %s", std::string(GIT_COMMIT_HASH)), wxDefaultPosition, wxDefaultSize);
+         credits_string->SetFont(_build_string_font);
+         wxFont version_font = GetFont();
+diff --git a/src/slic3r/GUI/GUI_App.cpp b/src/slic3r/GUI/GUI_App.cpp
+index eb219d5f..a6c1127c 100644
+--- a/src/slic3r/GUI/GUI_App.cpp
++++ b/src/slic3r/GUI/GUI_App.cpp
+@@ -2378,9 +2378,10 @@ void GUI_App::init_webview_runtime()
+ void GUI_App::init_app_config()
+ {
+ 	// Profiles for the alpha are stored into the PrusaSlicer-alpha directory to not mix with the current release.
+-    // OrcaSlicer Nonplanar keeps its own settings folder
+-    // (~/Library/Application Support/OrcaSlicerNonplanar), so a normal
+-    // OrcaSlicer next to it stays untouched.
++    // OrcaSlicer Nonplanar keeps its own settings folder (macOS:
++    // ~/Library/Application Support/OrcaSlicerNonplanar, Windows:
++    // %APPDATA%\OrcaSlicerNonplanar), so a normal OrcaSlicer next to it stays
++    // untouched.
+     SetAppName(SLIC3R_APP_KEY "Nonplanar");
+ //	SetAppName(SLIC3R_APP_KEY "-alpha");
+ //  SetAppName(SLIC3R_APP_KEY "-beta");
+diff --git a/src/slic3r/GUI/Plater.cpp b/src/slic3r/GUI/Plater.cpp
+index b92a228f..231cfa3e 100644
+--- a/src/slic3r/GUI/Plater.cpp
++++ b/src/slic3r/GUI/Plater.cpp
+@@ -10817,7 +10817,7 @@ void Plater::priv::set_project_name(const wxString& project_name)
+     if (!m_project_name.IsEmpty())
+         wxGetApp().mainframe->update_title_colour_after_set_title();
+ #else
+-    wxGetApp().mainframe->SetTitle(m_project_name + " - OrcaSlicer");
++    wxGetApp().mainframe->SetTitle(m_project_name + " - OrcaSlicer Nonplanar");
+     wxGetApp().mainframe->topbar()->SetTitle(m_project_name);
+ #endif
+ }
+@@ -10837,7 +10837,7 @@ void Plater::priv::update_title_dirty_status()
+     wxGetApp().mainframe->SetTitle(title);
+     wxGetApp().mainframe->update_title_colour_after_set_title();
+ #else
+-    wxGetApp().mainframe->SetTitle(title + " - OrcaSlicer");
++    wxGetApp().mainframe->SetTitle(title + " - OrcaSlicer Nonplanar");
+     wxGetApp().mainframe->topbar()->SetTitle(title);
+ #endif    
+ }
+diff --git a/tests/fff_print/test_nonplanar.cpp b/tests/fff_print/test_nonplanar.cpp
+index cbad88f6..a1a45e40 100644
+--- a/tests/fff_print/test_nonplanar.cpp
++++ b/tests/fff_print/test_nonplanar.cpp
+@@ -542,7 +542,8 @@ static double support_length(const std::string &gcode)
+     return length;
+ }
+ 
+-SCENARIO("Support sees the object before the conformal shells were moved", "[Nonplanar]")
++// [missing-fixture]: fixtures/support-issue.stl is not part of the repository.
++SCENARIO("Support sees the object before the conformal shells were moved", "[Nonplanar][missing-fixture]")
+ {
+     GIVEN("a part needing support, sliced with support with and without nonplanar layers") {
+         auto slice = [](const char *nonplanar) {
+diff --git a/version.inc b/version.inc
+index 6d85630a..4f64c940 100644
+--- a/version.inc
++++ b/version.inc
+@@ -9,7 +9,7 @@ set(BBL_INTERNAL_TESTING "0")
+ endif()
+ set(SoftFever_VERSION "2.4.2")
+ # OrcaSlicer Nonplanar release (shown in About and in the G-code header).
+-set(ORCA_NONPLANAR_VERSION "v0.1")
++set(ORCA_NONPLANAR_VERSION "v0.1-win1")
+ string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)"
+        SoftFever_VERSION_MATCH ${SoftFever_VERSION})
+ set(ORCA_VERSION_MAJOR ${CMAKE_MATCH_1})

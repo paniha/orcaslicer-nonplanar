@@ -1,0 +1,76 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Bump the suffix to force a dependency rebuild.
+  DEPS_CACHE_KEY: orca-2.4.2-8500fcd-windows-x64-deps-v1
+  SOURCE_DIR: C:\onp\orca
+
+jobs:
+  # Separate job, so a finished dependency build is cached even if the slicer
+  # build fails or hits the time limit. A re-run then starts at the slicer.
+  deps:
+    runs-on: windows-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Restore dependencies
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.SOURCE_DIR }}\deps\build\OrcaSlicer_dep
+          key: ${{ env.DEPS_CACHE_KEY }}
+          lookup-only: true
+
+      - name: Install tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: choco install strawberryperl -y --no-progress
+
+      - name: Build dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $env:Path = "C:\Strawberry\perl\bin;$env:Path"
+          .\windows\build-windows.ps1 -Stage deps -SourceDir $env:SOURCE_DIR
+
+  slicer:
+    needs: deps
+    runs-on: windows-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Restore dependencies
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.SOURCE_DIR }}\deps\build\OrcaSlicer_dep
+          key: ${{ env.DEPS_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Install tools
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Build slicer and package
+        shell: pwsh
+        run: .\windows\build-windows.ps1 -Stage slicer -Installer -SourceDir $env:SOURCE_DIR
+
+      - name: Upload build
+        uses: actions/upload-artifact@v7
+        with:
+          name: OrcaSlicer-Nonplanar-Windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+      # After the upload on purpose: a failing test should mark the run red but
+      # still leave the build available for inspection.
+      - name: Run nonplanar tests
+        shell: pwsh
+        run: .\windows\build-windows.ps1 -Stage tests -SourceDir $env:SOURCE_DIR
